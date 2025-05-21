@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Verlet Rope with GUI</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+    }
+    #ctx {
+      display: block;
+      background: black;
+    }
+    .gui {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      padding: 10px;
+      font-family: sans-serif;
+      border-radius: 8px;
+      z-index: 1000;
+    }
+    .gui input, .gui button {
+      margin-bottom: 5px;
+      width: 100%;
+    }
+    .gui label {
+      display: block;
+      margin-top: 5px;
+    }
+    #toggleUI {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      background: rgba(255,255,255,0.2);
+      border: none;
+      color: white;
+      font-size: 14px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      z-index: 1001;
+    }
+    .hidden {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="ctx"></canvas>
+
+  <div class="gui" id="gui">
+    <label>Rope Length <input type="number" id="ropeLength" value="64" /></label>
+    <label>Segment Length <input type="number" id="segmentLength" value="10" /></label>
+    <label>Gravity <input type="number" id="gravity" value="0.5" step="0.1" /></label>
+    <label>Constraint Iterations <input type="number" id="iterations" value="50" /></label>
+    <label>Number of Ropes <input type="number" id="numRopes" value="124" /></label>
+    <label>Rope Width <input type="number" id="ropeWidth" value="1" /></label>
+    <label>Ball Radius <input type="number" id="ballRadius" value="50" /></label>
+    <button id="addBall">Add Ball</button>
+    <button id="oscillateBall">Oscillate Selected Ball (shortcut: O)</button>
+  </div>
+
+  <button id="toggleUI">Hide UI</button>
+
+  <script>
+    const canvas = document.getElementById("ctx");
+    const ctx = canvas.getContext("2d");
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    // UI Elements
+    const gui = document.getElementById("gui");
+    const toggleBtn = document.getElementById("toggleUI");
+    const ropeLengthInput = document.getElementById("ropeLength");
+    const segmentLengthInput = document.getElementById("segmentLength");
+    const gravityInput = document.getElementById("gravity");
+    const iterationsInput = document.getElementById("iterations");
+    const numRopesInput = document.getElementById("numRopes");
+    const ropeWidthInput = document.getElementById("ropeWidth");
+    const ballRadiusInput = document.getElementById("ballRadius");
+    const addBallBtn = document.getElementById("addBall");
+    const oscillateBtn = document.getElementById("oscillateBall");
+
+    let ropes = [];
+    let balls = [];
+    let selectedBallIndex = 0;
+
+    let segmentLength = parseFloat(segmentLengthInput.value);
+    let ropeLength = parseInt(ropeLengthInput.value);
+    let gravity = parseFloat(gravityInput.value);
+    let constraintIterations = parseInt(iterationsInput.value);
+    let numRopes = parseInt(numRopesInput.value);
+    let ropeWidth = parseFloat(ropeWidthInput.value);
+
+    const Mouse = { x: 10000, y: 10000 };
+
+    function createBall(x = canvas.width/2 + Math.random()*200-100, y = canvas.height/2 + Math.random()*200-100, radius = parseFloat(ballRadiusInput.value)) {
+      balls.push({
+        x, y, radius,
+        isDragging: false,
+        animate: false,
+        t: 0,
+        startX: x
+      });
+      selectedBallIndex = balls.length - 1;
+    }
+
+    function initialize() {
+      ropes = [];
+      const startY = 10;
+      for (let r = 0; r < numRopes; r++) {
+        const startX = canvas.width / (numRopes + 1) * (r + 1);
+        const rope = [];
+
+        for (let i = 0; i < ropeLength; i++) {
+          rope.push({
+            x: startX,
+            y: startY + i * segmentLength,
+            prevX: startX,
+            prevY: startY + i * segmentLength,
+            fixed: i === 0
+          });
+        }
+
+        ropes.push(rope);
+      }
+    }
+
+    function ballCollisionWithRopes() {
+      for (let ball of balls) {
+        for (let rope of ropes) {
+          for (let i = 1; i < rope.length; i++) {
+            const point = rope[i];
+            let dx = point.x - ball.x;
+            let dy = point.y - ball.y;
+            let dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < ball.radius) {
+              const overlap = ball.radius - dist;
+              const nx = dx / dist;
+              const ny = dy / dist;
+              point.x += nx * overlap;
+              point.y += ny * overlap;
+            }
+          }
+        }
+      }
+    }
+
+    function compute() {
+      for (let rope of ropes) {
+        for (let point of rope) {
+          if (point.fixed) continue;
+          const vx = (point.x - point.prevX) * 0.99;
+          const vy = (point.y - point.prevY) * 0.99 + gravity;
+          point.prevX = point.x;
+          point.prevY = point.y;
+          point.x += vx;
+          point.y += vy;
+        }
+
+        for (let iter = 0; iter < constraintIterations; iter++) {
+          for (let i = 0; i < rope.length - 1; i++) {
+            const p1 = rope[i];
+            const p2 = rope[i + 1];
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist === 0) continue;
+            const difference = dist - segmentLength;
+            const nx = dx / dist;
+            const ny = dy / dist;
+            const offsetX = nx * difference * 0.5;
+            const offsetY = ny * difference * 0.5;
+
+            if (!p1.fixed && !p2.fixed) {
+              p1.x += offsetX;
+              p1.y += offsetY;
+              p2.x -= offsetX;
+              p2.y -= offsetY;
+            } else if (p1.fixed && !p2.fixed) {
+              p2.x -= offsetX * 2;
+              p2.y -= offsetY * 2;
+            } else if (!p1.fixed && p2.fixed) {
+              p1.x += offsetX * 2;
+              p1.y += offsetY * 2;
+            }
+          }
+        }
+      }
+
+      ballCollisionWithRopes();
+    }
+
+    function render() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.lineWidth = ropeWidth;
+      ctx.strokeStyle = "white";
+      for (let rope of ropes) {
+        ctx.beginPath();
+        for (let i = 0; i < rope.length - 1; i++) {
+          ctx.moveTo(rope[i].x, rope[i].y);
+          ctx.lineTo(rope[i + 1].x, rope[i + 1].y);
+        }
+        ctx.stroke();
+      }
+
+      for (let ball of balls) {
+        ctx.fillStyle = "red";
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function animateLoop() {
+      for (let ball of balls) {
+        if (ball.animate) {
+          ball.t += 0.01;
+          const amplitude = 200;
+          ball.x = ball.startX + Math.sin(ball.t) * amplitude;
+        }
+      }
+      compute();
+      render();
+      requestAnimationFrame(animateLoop);
+    }
+
+    canvas.addEventListener("mousedown", e => {
+      for (let i = balls.length - 1; i >= 0; i--) {
+        const ball = balls[i];
+        const dx = e.clientX - ball.x;
+        const dy = e.clientY - ball.y;
+        if (Math.sqrt(dx * dx + dy * dy) < ball.radius) {
+          ball.isDragging = true;
+          ball.animate = false;
+          selectedBallIndex = i;
+          break;
+        }
+      }
+    });
+
+    canvas.addEventListener("mousemove", e => {
+      for (let ball of balls) {
+        if (ball.isDragging) {
+          ball.x = e.clientX;
+          ball.y = e.clientY;
+        }
+      }
+    });
+
+    canvas.addEventListener("mouseup", () => {
+      for (let ball of balls) ball.isDragging = false;
+    });
+
+    window.addEventListener("keydown", e => {
+      if (e.key === "o") {
+        const ball = balls[selectedBallIndex];
+        if (ball) {
+          ball.animate = true;
+          ball.t = 0;
+          ball.startX = ball.x;
+        }
+      }
+    });
+
+    // GUI Button Actions
+    toggleBtn.addEventListener("click", () => {
+      gui.classList.toggle("hidden");
+      toggleBtn.style.background = gui.classList.contains("hidden") ? "transparent" : "rgba(255,255,255,0.2)";
+    });
+
+    addBallBtn.addEventListener("click", () => {
+      createBall();
+    });
+
+    oscillateBtn.addEventListener("click", () => {
+      const ball = balls[selectedBallIndex];
+      if (ball) {
+        ball.animate = true;
+        ball.t = 0;
+        ball.startX = ball.x;
+      }
+    });
+
+    // Re-read input values and restart simulation
+    function applySettings() {
+      ropeLength = parseInt(ropeLengthInput.value);
+      segmentLength = parseFloat(segmentLengthInput.value);
+      gravity = parseFloat(gravityInput.value);
+      constraintIterations = parseInt(iterationsInput.value);
+      numRopes = parseInt(numRopesInput.value);
+      ropeWidth = parseFloat(ropeWidthInput.value);
+      initialize();
+    }
+
+    ropeLengthInput.addEventListener("change", applySettings);
+    segmentLengthInput.addEventListener("change", applySettings);
+    gravityInput.addEventListener("change", applySettings);
+    iterationsInput.addEventListener("change", applySettings);
+    numRopesInput.addEventListener("change", applySettings);
+    ropeWidthInput.addEventListener("change", () => {
+      ropeWidth = parseFloat(ropeWidthInput.value);
+    });
+    ballRadiusInput.addEventListener("change", () => {
+      balls.forEach(b => b.radius = parseFloat(ballRadiusInput.value));
+    });
+
+    // Init
+    createBall(); // Add one ball at start
+    initialize();
+    animateLoop();
+  </script>
+</body>
+</html>
